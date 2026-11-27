@@ -111,6 +111,31 @@ public struct WorldHistory: Codable, Hashable {
 
 extension GameState {
 
+    /// Combines archived trophies with wins confirmed in the ongoing season.
+    func trophyCabinet(for club: Club) -> [HonourRecord] {
+        let archived = history.honours(for: club.id)
+        let year = season.year
+        var current: [HonourRecord] = []
+
+        func add(_ competition: String, kind: HonourRecord.Kind) {
+            guard !archived.contains(where: { $0.season == year && $0.competition == competition && $0.kind == kind }) else { return }
+            current.append(HonourRecord(season: year, competition: competition, kind: kind, clubId: club.id, clubName: club.name))
+        }
+
+        for league in leagues where league.clubIds.contains(club.id) {
+            if clinchedHonours.contains(clinchedHonourKey(.champions, clubId: club.id, league: league)) {
+                add(league.name, kind: .league)
+            }
+        }
+        for cup in domesticCups where cup.championClubId == club.id {
+            add(cup.name, kind: .cup)
+        }
+        for competition in europeanCompetitions where competition.championClubId == club.id {
+            add(competition.competition.displayName, kind: .europe)
+        }
+        return current + archived
+    }
+
     // MARK: - Recording a season
 
     /// Records champions, awards and the user's club legends. Called once at

@@ -524,7 +524,7 @@ public struct Club: Codable, Identifiable, Hashable {
         while !openSlots.isEmpty && usedPlayers.count < pool.count {
             var best: (slot: Int, player: Int, score: Double)?
             for i in pool.indices where !usedPlayers.contains(i) {
-                for s in openSlots where best == nil || scores[i][s] > best!.score {
+                for s in requiredPositions.indices where openSlots.contains(s) && (best == nil || scores[i][s] > best!.score) {
                     best = (s, i, scores[i][s])
                 }
             }

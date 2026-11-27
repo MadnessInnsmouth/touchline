@@ -45,9 +45,10 @@ extension GameState {
             guard table.count >= 2 else { continue }
             func ceiling(_ row: LeagueStanding) -> Int { row.points + 3 * (remaining[row.clubId] ?? 0) }
 
-            // The title: no one else can reach the leader's points.
+            // Before the final whistle, use the points ceiling. Once all games
+            // are played, the sorted table has already applied the tie-breakers.
             let leader = table[0]
-            if table.dropFirst().allSatisfy({ ceiling($0) < leader.points }) {
+            if remaining.isEmpty || table.dropFirst().allSatisfy({ ceiling($0) < leader.points }) {
                 clinch(.champions, clubId: leader.clubId, league: league, gamesLeft: remaining[leader.clubId] ?? 0)
             }
 
@@ -66,8 +67,12 @@ extension GameState {
         }
     }
 
+    func clinchedHonourKey(_ kind: Celebration.Kind, clubId: UUID, league: League) -> String {
+        "\(kind.rawValue)|\(league.name)|\(season.year)|\(clubId.uuidString)"
+    }
+
     private func clinch(_ kind: Celebration.Kind, clubId: UUID, league: League, gamesLeft: Int, toLeague: String? = nil) {
-        let key = "\(kind.rawValue)|\(league.name)|\(season.year)|\(clubId.uuidString)"
+        let key = clinchedHonourKey(kind, clubId: clubId, league: league)
         guard !clinchedHonours.contains(key) else { return }
         clinchedHonours.append(key)
         let name = clubName(for: clubId)

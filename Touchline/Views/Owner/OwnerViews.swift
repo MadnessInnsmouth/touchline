@@ -132,7 +132,7 @@ public struct OwnerCareerTabView: View {
             Group {
                 NavigationLink { OwnerPolicyView() } label: { HubTile(title: "Policy", icon: "slider.horizontal.3") }
                 NavigationLink { OwnerLegacyView() } label: { HubTile(title: "Legacy", icon: "rosette") }
-                screenTile("History", "trophy.fill", .history)
+                screenTile("Trophy Cabinet & Records", "trophy.fill", .history)
                 screenTile("Settings", "gearshape.fill", .settings)
                 screenTile("Menu", "house.fill", .mainMenu)
             }

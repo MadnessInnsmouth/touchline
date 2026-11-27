@@ -15,6 +15,7 @@ struct HistoryView: View {
 
     enum Section: String, CaseIterable, Identifiable {
         case trophies = "Trophies"
+        case records = "Records"
         case legends = "Hall of Fame"
         case champions = "Champions"
         case awards = "Awards"
@@ -32,6 +33,7 @@ struct HistoryView: View {
 
             switch section {
             case .trophies: trophies
+            case .records: records
             case .legends: legends
             case .champions: champions
             case .awards: awards
@@ -56,17 +58,22 @@ struct HistoryView: View {
     @ViewBuilder
     private var trophies: some View {
         if let club = gameState.userClub {
-            let won = history.honours(for: club.id)
+            let won = gameState.trophyCabinet(for: club)
             if won.isEmpty {
                 SwiftUI.Section {
                     ContentUnavailableView("The Cabinet Is Empty",
                                            systemImage: "trophy",
-                                           description: Text("Trophies won by \(club.name) will be displayed here."))
+                                           description: Text("\(club.name) has won 0 trophies in this career."))
                 }
             } else {
                 let grouped = Dictionary(grouping: won, by: { $0.competition })
-                SwiftUI.Section(header: Text("\(club.name) • \(won.count) honour\(won.count == 1 ? "" : "s")")) {
-                    ForEach(grouped.keys.sorted { grouped[$0]!.count > grouped[$1]!.count }, id: \.self) { name in
+                let competitions = grouped.keys.sorted { lhs, rhs in
+                    let left = grouped[lhs]?.count ?? 0
+                    let right = grouped[rhs]?.count ?? 0
+                    return left == right ? lhs < rhs : left > right
+                }
+                SwiftUI.Section(header: Text("\(club.name), \(won.count) \(won.count == 1 ? "trophy" : "trophies")")) {
+                    ForEach(competitions, id: \.self) { name in
                         let wins = grouped[name] ?? []
                         HStack(spacing: 14) {
                             Image(systemName: icon(for: wins.first?.kind ?? .cup)).accessibilityHidden(true)
@@ -84,10 +91,27 @@ struct HistoryView: View {
                                 .font(.title3.weight(.bold).monospacedDigit())
                         }
                         .padding(.vertical, 4)
-                        .accessibilityElement(children: .combine)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(name), \(wins.count) \(wins.count == 1 ? "trophy" : "trophies"). \(wins.map { $0.season }.joined(separator: ", "))")
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var records: some View {
+        let book = gameState.clubRecords
+        if let club = gameState.userClub, book.clubId == club.id, book.matchesTracked > 0 {
+            SwiftUI.Section(header: Text("Since you took charge")) {
+                LabeledContent("Matches tracked", value: book.matchesTracked.formatted())
+                LabeledContent("Biggest win", value: book.biggestWin > 0 ? book.biggestWinText : "None yet")
+                LabeledContent("Heaviest defeat", value: book.heaviestDefeat > 0 ? book.heaviestDefeatText : "None yet")
+                LabeledContent("Highest home attendance", value: book.recordCrowd > 0 ? book.recordCrowd.formatted() : "None yet")
+            }
+        } else {
+            ContentUnavailableView("No Club Records Yet", systemImage: "book.closed",
+                                   description: Text("Records appear after you play a match with your club."))
         }
     }
 

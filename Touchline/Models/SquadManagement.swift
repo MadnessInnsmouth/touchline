@@ -190,6 +190,11 @@ extension GameState {
         clubs[idx].autoPickStartingXI()
     }
 
+    func setAutomaticMatchdaySelection(_ enabled: Bool) {
+        matchSettings.autoSelectMatchdayLineup = enabled
+        try? SaveManager.shared.autoSave(gameState: self)
+    }
+
     // MARK: Match-only lineups
 
     /// Whether the current lineup is a one-off for the next match.

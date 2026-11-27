@@ -324,12 +324,12 @@ public struct DashboardView: View {
                         .screen("League Table", "list.number", .standings),
                         .screen("Fixtures & Results", "calendar", .matchHistory),
                         .screen("Europe", "star.circle.fill", .europeanCompetitions),
-                        .screen("News", "newspaper.fill", .news),
-                        .screen("History", "trophy.fill", .history)
+                        .screen("News", "newspaper.fill", .news)
                     ])
                 } label: { HubTile(title: "Competitions", icon: "list.number") }
                 NavigationLink {
                     HubGroupView(title: "Club", rows: [
+                        .screen("Trophy Cabinet & Records", "trophy.fill", .history),
                         .screen("Finances", "sterlingsign.circle.fill", .finances),
                         .screen("Staff", "person.2.badge.gearshape.fill", .staff),
                         .screen("Youth Academy", "figure.and.child.holdinghands", .youthAcademy),

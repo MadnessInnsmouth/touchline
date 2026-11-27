@@ -140,7 +140,8 @@ public struct PostMatchView: View {
         let goals = res.homeGoals + res.awayGoals > 0
             ? " Goals: \([scorers(true), scorers(false)].filter { !$0.isEmpty }.joined(separator: "; "))."
             : ""
-        return "Full time. \(home.name) \(res.homeGoals), \(away.name) \(res.awayGoals).\(verdict)\(goals)"
+        let penalties = res.shootout.map { " Penalties: \(home.name) \($0.home), \(away.name) \($0.away)." } ?? ""
+        return "Full time. \(home.name) \(res.homeGoals), \(away.name) \(res.awayGoals).\(penalties)\(verdict)\(goals)"
     }
 
     /// Crests and names either side of a big score, with each side's scorers
@@ -169,6 +170,9 @@ public struct PostMatchView: View {
                     Text("Full time")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white.opacity(0.75))
+                    if let shootout = res.shootout {
+                        Text(shootout.scoreText).font(.caption.weight(.semibold))
+                    }
                     if outcome != "-" {
                         Text(outcome == "W" ? "Victory" : outcome == "D" ? "Draw" : "Defeat")
                             .font(.caption.weight(.heavy))
@@ -566,7 +570,7 @@ public struct PostMatchView: View {
                             Text(entry.homeName)
                                 .font(.subheadline)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
-                            Text("\(entry.result.homeGoals) – \(entry.result.awayGoals)")
+                            Text(entry.result.scoreText)
                                 .font(.subheadline.weight(.bold).monospacedDigit())
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 3)

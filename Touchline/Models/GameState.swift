@@ -1112,11 +1112,11 @@ public final class GameState: Codable {
             let name = competition.competition.displayName
             let alreadyPlayed = Set(competition.fixtures.filter { $0.isPlayed }.map { $0.id })
             // Ties the manager played as a match day keep their real score.
-            var playedByUser: [String: (Int, Int)] = [:]
+            var playedByUser: [String: MatchResult] = [:]
             for tie in competition.fixtures where tie.matchweek == week && !tie.isPlayed {
                 if let mirror = season.fixtures.first(where: { $0.europeanFixtureId == tie.id }),
                    let result = mirror.result {
-                    playedByUser["\(tie.homeClubId)|\(tie.awayClubId)"] = (result.homeGoals, result.awayGoals)
+                    playedByUser["\(tie.homeClubId)|\(tie.awayClubId)"] = result
                 }
             }
             competition.advanceMatchweek(week: week) { home, away in
@@ -1135,7 +1135,7 @@ public final class GameState: Codable {
                     let stage = fixture.stage + (fixture.leg > 0 ? ", leg \(fixture.leg)" : "")
                     addNews(
                         headline: "\(competition.competition.displayName): \(clubName(for: fixture.homeClubId)) \(fixture.homeGoals)-\(fixture.awayGoals) \(clubName(for: fixture.awayClubId))",
-                        body: "\(name), \(stage).",
+                        body: "\(name), \(stage)." + (fixture.shootout.map { " \($0.scoreText)." } ?? ""),
                         category: .general,
                         sender: name
                     )
@@ -1167,18 +1167,15 @@ public final class GameState: Codable {
     /// Plays a European tie through the full match engine, so it costs
     /// fitness, can cause injuries and counts towards player stats. UEFA
     /// discipline is separate: European cards do not change domestic bans.
-    private func playEuropeanMatch(home: UUID, away: UUID, competition: String, week: Int) -> (Int, Int) {
+    private func playEuropeanMatch(home: UUID, away: UUID, competition: String, week: Int) -> MatchResult? {
         guard let hIdx = clubs.firstIndex(where: { $0.id == home }),
-              let aIdx = clubs.firstIndex(where: { $0.id == away }) else { return (0, 0) }
+              let aIdx = clubs.firstIndex(where: { $0.id == away }) else { return nil }
         var homeClub = clubs[hIdx]
         var awayClub = clubs[aIdx]
-        let assistantRotates = matchSettings.assistantRotatesTiredPlayers
-        for idx in [0, 1] {
-            var side = idx == 0 ? homeClub : awayClub
-            if !(side.isUserClub && gameMode == .manageClub) { side.prepareAIMatchday() }
-            else if assistantRotates { side.rotateTiredStarters() }
-            if idx == 0 { homeClub = side } else { awayClub = side }
-        }
+        let userManagesHome = homeClub.isUserClub && gameMode == .manageClub
+        let userManagesAway = awayClub.isUserClub && gameMode == .manageClub
+        if !userManagesHome { homeClub.prepareAIMatchday() }
+        if !userManagesAway { awayClub.prepareAIMatchday() }
         var discipline: [UUID: (Int, Int)] = [:]
         for player in homeClub.players + awayClub.players {
             discipline[player.id] = (player.suspendedMatches, player.yellowCards)
@@ -1205,7 +1202,23 @@ public final class GameState: Codable {
                 config.isKnockout = true
             }
         }
+        let homeUsual = homeClub.tactics
+        let awayUsual = awayClub.tactics
+        if matchSettings.autoSelectMatchdayLineup {
+            if userManagesHome {
+                homeClub.tactics = MatchEngine.selectMatchdayLineup(for: homeClub, against: awayClub, isHome: true, config: config)
+            } else if userManagesAway {
+                awayClub.tactics = MatchEngine.selectMatchdayLineup(for: awayClub, against: homeClub, isHome: false, config: config)
+            }
+        } else if matchSettings.assistantRotatesTiredPlayers {
+            if userManagesHome { homeClub.rotateTiredStarters() }
+            if userManagesAway { awayClub.rotateTiredStarters() }
+        }
         let result = MatchEngine.simulateFullMatch(home: &homeClub, away: &awayClub, config: config)
+        if matchSettings.autoSelectMatchdayLineup {
+            if userManagesHome { homeClub.tactics = homeUsual }
+            if userManagesAway { awayClub.tactics = awayUsual }
+        }
         for club in [homeClub, awayClub] {
             var updated = club
             for p in updated.players.indices {
@@ -1218,7 +1231,7 @@ public final class GameState: Codable {
             updated.seasonResults.removeAll { $0.id == result.id }
             if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated }
         }
-        return (result.homeGoals, result.awayGoals)
+        return result
     }
 
     /// The unplayed European tie between these clubs in this matchweek.
@@ -1934,7 +1947,9 @@ public final class GameState: Codable {
         let opponent = clubName(for: opponentId)
         let swing = 3 * derby.intensity
 
-        if goalsFor > goalsAgainst {
+        let outcome = result.outcomeLetter(for: clubs[clubIdx].id)
+        let score = "\(goalsFor)-\(goalsAgainst)" + (result.shootout.map { " (\($0.scoreText))" } ?? "")
+        if outcome == "W" {
             for p in clubs[clubIdx].players.indices {
                 clubs[clubIdx].players[p].boostMorale()
                 if derby.intensity >= 3 { clubs[clubIdx].players[p].boostMorale() }
@@ -1943,11 +1958,11 @@ public final class GameState: Codable {
             adjustFans(swing)
             addNews(
                 headline: "\(derby.name) Glory!",
-                body: "A \(goalsFor)-\(goalsAgainst) win over \(opponent). The fans will be talking about this one for weeks, and the dressing room is buzzing.",
+                body: "A \(score) win over \(opponent). The fans will be talking about this one for weeks, and the dressing room is buzzing.",
                 category: .general,
                 sender: "Supporters' Club"
             )
-        } else if goalsFor < goalsAgainst {
+        } else if outcome == "L" {
             for p in clubs[clubIdx].players.indices {
                 clubs[clubIdx].players[p].dampenMorale()
             }
@@ -1955,7 +1970,7 @@ public final class GameState: Codable {
             adjustFans(-(swing))
             addNews(
                 headline: "\(derby.name) Misery",
-                body: "Losing \(goalsFor)-\(goalsAgainst) to \(opponent) hurts. Supporters are furious and the board expect a reaction.",
+                body: "Losing \(score) to \(opponent) hurts. Supporters are furious and the board expect a reaction.",
                 category: .general,
                 sender: "Supporters' Club"
             )
@@ -2396,8 +2411,8 @@ public final class GameState: Codable {
         // is run by the appointed manager, so it rotates too.)
         let userManages: (Club) -> Bool = { $0.isUserClub && self.gameMode == .manageClub }
         let assistantRotates = matchSettings.assistantRotatesTiredPlayers
-        if !userManages(homeClub) { homeClub.prepareAIMatchday() } else if assistantRotates { homeClub.rotateTiredStarters() }
-        if !userManages(awayClub) { awayClub.prepareAIMatchday() } else if assistantRotates { awayClub.rotateTiredStarters() }
+        if !userManages(homeClub) { homeClub.prepareAIMatchday() } else if assistantRotates && !matchSettings.autoSelectMatchdayLineup { homeClub.rotateTiredStarters() }
+        if !userManages(awayClub) { awayClub.prepareAIMatchday() } else if assistantRotates && !matchSettings.autoSelectMatchdayLineup { awayClub.rotateTiredStarters() }
         
         // Snapshot pre-match bans. Players who were already suspended when the
         // fixture kicked off have now served one match of that ban.
@@ -2438,7 +2453,31 @@ public final class GameState: Codable {
             config.userAutoSubs = matchSettings.autoSubTiming
             config.userAutoSubAggression = matchSettings.autoSubAggression
         }
+        if matchSettings.autoSelectMatchdayLineup, !hasMatchOnlyLineup, let uid = config.userClubId {
+            if homeClub.id == uid {
+                homeClub.tactics = MatchEngine.selectMatchdayLineup(for: homeClub, against: awayClub, isHome: true, config: config)
+            } else {
+                awayClub.tactics = MatchEngine.selectMatchdayLineup(for: awayClub, against: homeClub, isHome: false, config: config)
+            }
+        }
         return (homeClub, awayClub, homeSuspensionsBefore, awaySuspensionsBefore, config)
+    }
+
+    /// The lineup that will kick off, including an automatic matchday pick.
+    func matchdayUserClub(for fixture: Fixture) -> Club? {
+        guard matchSettings.autoSelectMatchdayLineup, gameMode == .manageClub, !fixture.isPlayed,
+              let uid = userClubId, fixture.involves(clubId: uid), !hasMatchOnlyLineup,
+              let home = clubs.firstIndex(where: { $0.id == fixture.homeClubId }),
+              let away = clubs.firstIndex(where: { $0.id == fixture.awayClubId }) else { return userClub }
+        let prepared = prepareMatch(fixture, homeIdx: home, awayIdx: away)
+        return fixture.homeClubId == uid ? prepared.home : prepared.away
+    }
+
+    func beginEditingMatchdayLineup(for fixture: Fixture) {
+        guard let idx = clubs.firstIndex(where: { $0.isUserClub }) else { return }
+        let preview = matchdayUserClub(for: fixture)
+        beginMatchOnlyLineup()
+        if let preview { clubs[idx].tactics = preview.tactics }
     }
 
     /// Kicks off a live match. It is then played a minute at a time with
@@ -2573,6 +2612,10 @@ public final class GameState: Codable {
             homeSuspensionsBefore = prepared.homeSuspensions
             awaySuspensionsBefore = prepared.awaySuspensions
             result = MatchEngine.simulateFullMatch(home: &homeClub, away: &awayClub, config: prepared.config)
+            if matchSettings.autoSelectMatchdayLineup, !hasMatchOnlyLineup {
+                if prepared.config.userClubId == homeClub.id { homeClub.tactics = clubs[homeIdx].tactics }
+                if prepared.config.userClubId == awayClub.id { awayClub.tactics = clubs[awayIdx].tactics }
+            }
         }
         
         for pIdx in homeClub.players.indices {
@@ -4197,8 +4240,8 @@ public final class GameState: Codable {
         let previousStatus = jobSecurity.status
         let goalsFor = userWasHome ? result.homeGoals : result.awayGoals
         let goalsAgainst = userWasHome ? result.awayGoals : result.homeGoals
-        let won = goalsFor > goalsAgainst
-        let drawn = goalsFor == goalsAgainst
+        let won = result.winnerClubId == (userWasHome ? result.homeClubId : result.awayClubId)
+        let drawn = result.isDraw
         if won {
             jobSecurity.gamesWithoutWin = 0
             jobSecurity.underperformingWeeks = max(0, jobSecurity.underperformingWeeks - 1)
@@ -4311,8 +4354,8 @@ public final class GameState: Codable {
     private func updateOwnerMatchPerformance(after result: MatchResult, userWasHome: Bool) {
         let goalsFor = userWasHome ? result.homeGoals : result.awayGoals
         let goalsAgainst = userWasHome ? result.awayGoals : result.homeGoals
-        let won = goalsFor > goalsAgainst
-        let drawn = goalsFor == goalsAgainst
+        let won = result.winnerClubId == (userWasHome ? result.homeClubId : result.awayClubId)
+        let drawn = result.isDraw
 
         var pointsEarned = 0
         if won {
@@ -5708,11 +5751,12 @@ public final class GameState: Codable {
     }
 
     /// Who went through a two-legged play-off semi-final: aggregate score
-    /// (a second-leg shootout is recorded as a one-goal win), and the
+    /// or a second-leg shootout, with the
     /// higher seed, at home in the second leg, if it is somehow still level.
     private func playOffAggregateWinner(secondLeg: Fixture, firstLegs: [Fixture]) -> UUID {
         let higher = secondLeg.homeClubId, lower = secondLeg.awayClubId
         guard let second = secondLeg.result else { return higher }
+        if let winner = second.shootoutWinnerClubId { return winner }
         let first = firstLegs.first { $0.homeClubId == lower && $0.awayClubId == higher }?.result
         let higherGoals = second.homeGoals + (first?.awayGoals ?? 0)
         let lowerGoals = second.awayGoals + (first?.homeGoals ?? 0)

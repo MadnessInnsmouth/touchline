@@ -169,6 +169,7 @@ public enum InternationalTournament {
         public var isPlayed: Bool
         public var homeGoals: Int
         public var awayGoals: Int
+        public var shootout: PenaltyShootout? = nil
         /// The day it is played (yyyy-MM-dd). Nil in older saves.
         public var date: String?
 
@@ -342,10 +343,11 @@ public enum InternationalTournament {
 
         /// Records a match the user played, and moves the tournament on if
         /// that completes a stage.
-        public mutating func recordResult(fixtureId: UUID, homeGoals: Int, awayGoals: Int) {
+        public mutating func recordResult(fixtureId: UUID, homeGoals: Int, awayGoals: Int, shootout: PenaltyShootout? = nil) {
             guard let idx = fixtures.firstIndex(where: { $0.id == fixtureId }) else { return }
             fixtures[idx].homeGoals = homeGoals
             fixtures[idx].awayGoals = awayGoals
+            fixtures[idx].shootout = shootout
             fixtures[idx].isPlayed = true
             rollStage()
         }
@@ -409,6 +411,7 @@ public enum InternationalTournament {
                 $0.stage == stage && $0.isPlayed &&
                 (($0.homeTeamId == a && $0.awayTeamId == b) || ($0.homeTeamId == b && $0.awayTeamId == a))
             }) else { return a }
+            if let shootout = f.shootout { return shootout.home > shootout.away ? f.homeTeamId : f.awayTeamId }
             if f.homeGoals > f.awayGoals { return f.homeTeamId }
             if f.awayGoals > f.homeGoals { return f.awayTeamId }
             return ranking(a) <= ranking(b) ? a : b

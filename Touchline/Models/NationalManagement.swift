@@ -20,13 +20,17 @@ public struct InternationalReport: Codable, Hashable, Identifiable {
     public var awayName: String
     public var homeGoals: Int
     public var awayGoals: Int
+    public var shootout: PenaltyShootout? = nil
     /// Whether the user's nation was the home side.
     public var userIsHome: Bool
     public var events: [MatchEvent]
 
-    public var scoreLine: String { "\(homeName) \(homeGoals)-\(awayGoals) \(awayName)" }
-    public var userWon: Bool { userIsHome ? homeGoals > awayGoals : awayGoals > homeGoals }
-    public var isDraw: Bool { homeGoals == awayGoals }
+    public var scoreLine: String { "\(homeName) \(homeGoals)-\(awayGoals) \(awayName)" + (shootout.map { " (\($0.scoreText))" } ?? "") }
+    public var userWon: Bool {
+        if let shootout { return userIsHome ? shootout.home > shootout.away : shootout.away > shootout.home }
+        return userIsHome ? homeGoals > awayGoals : awayGoals > homeGoals
+    }
+    public var isDraw: Bool { homeGoals == awayGoals && shootout == nil }
 }
 
 extension GameState {
@@ -132,7 +136,7 @@ extension GameState {
         let result = MatchEngine.simulateFullMatch(home: &homeSide, away: &awaySide, config: config)
 
         var tournament = internationalTournaments[tIdx]
-        tournament.recordResult(fixtureId: due.fixture.id, homeGoals: result.homeGoals, awayGoals: result.awayGoals)
+        tournament.recordResult(fixtureId: due.fixture.id, homeGoals: result.homeGoals, awayGoals: result.awayGoals, shootout: result.shootout)
         internationalTournaments[tIdx] = tournament
 
         let report = InternationalReport(
@@ -144,6 +148,7 @@ extension GameState {
             awayName: away.name,
             homeGoals: result.homeGoals,
             awayGoals: result.awayGoals,
+            shootout: result.shootout,
             userIsHome: userIsHome,
             events: result.events
         )

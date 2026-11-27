@@ -461,6 +461,7 @@ public struct MatchHistoryView: View {
         let opponent = gameState.club(withId: isHome ? fixture.awayClubId : fixture.homeClubId)
         let goalsFor = isHome ? fixture.homeGoals : fixture.awayGoals
         let goalsAgainst = isHome ? fixture.awayGoals : fixture.homeGoals
+        let penalties = fixture.shootout.map { " (\($0.scoreText))" } ?? ""
         let stage = fixture.stage + (fixture.leg > 0 ? " (leg \(fixture.leg))" : "")
         return HStack(spacing: 12) {
             Image(systemName: "star.circle.fill").accessibilityHidden(true)
@@ -477,14 +478,14 @@ public struct MatchHistoryView: View {
             }
             Spacer()
             if fixture.isPlayed {
-                Text("\(goalsFor) - \(goalsAgainst)")
+                Text("\(goalsFor) - \(goalsAgainst)\(penalties)")
                     .font(.title3.monospacedDigit())
                     .fontWeight(.bold)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(fixture.isPlayed
-            ? "\(competition), \(stage): \(goalsFor) \(goalsAgainst) \(isHome ? "at home to" : "away to") \(opponent?.name ?? "opponent")"
+            ? "\(competition), \(stage): \(goalsFor) \(goalsAgainst)\(penalties) \(isHome ? "at home to" : "away to") \(opponent?.name ?? "opponent")"
             : "\(competition), \(stage): \(isHome ? "home to" : "away to") \(opponent?.name ?? "opponent")")
     }
 }
@@ -508,12 +509,7 @@ public struct MatchResultRow: View {
     private var result: MatchResult? { fixture.isPlayed ? fixture.result : nil }
     private var goalsFor: Int { result.map { isHome ? $0.homeGoals : $0.awayGoals } ?? 0 }
     private var goalsAgainst: Int { result.map { isHome ? $0.awayGoals : $0.homeGoals } ?? 0 }
-    private var outcome: String {
-        guard result != nil else { return isHome ? "H" : "A" }
-        if goalsFor > goalsAgainst { return "W" }
-        if goalsFor < goalsAgainst { return "L" }
-        return "D"
-    }
+    private var outcome: String { result?.outcomeLetter(for: userClub.id) ?? (isHome ? "H" : "A") }
     private var outcomeColor: Color {
         switch outcome {
         case "W": return .winGreen
@@ -556,16 +552,19 @@ public struct MatchResultRow: View {
 
             Spacer()
 
-            if result != nil {
-                Text("\(goalsFor) - \(goalsAgainst)")
-                    .font(.title3.monospacedDigit())
-                    .fontWeight(.bold)
+            if let result {
+                VStack(alignment: .trailing) {
+                    Text("\(goalsFor) - \(goalsAgainst)")
+                        .font(.title3.monospacedDigit())
+                        .fontWeight(.bold)
+                    if let shootout = result.shootout { Text(shootout.scoreText).font(.caption) }
+                }
             }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(result != nil
-            ? "\(outcome == "W" ? "Won" : outcome == "L" ? "Lost" : "Drew") \(goalsFor) \(goalsAgainst) \(isHome ? "at home to" : "away to") \(opponent?.name ?? "opponent"). \(competitionLabel). \(fixture.date)."
+            ? "\(outcome == "W" ? "Won" : outcome == "L" ? "Lost" : "Drew") \(goalsFor) \(goalsAgainst) \(isHome ? "at home to" : "away to") \(opponent?.name ?? "opponent"). \(result?.shootout.map { "Penalties: \($0.scoreText). " } ?? "")\(competitionLabel). \(fixture.date)."
             : "\(isHome ? "Home to" : "Away to") \(opponent?.name ?? "opponent"), \(competitionLabel), \(fixture.date).")
     }
 }
@@ -788,7 +787,7 @@ struct FixtureCardRow: View {
                 Spacer()
                 VStack(spacing: 2) {
                     if let result {
-                        Text("\(result.homeGoals) - \(result.awayGoals)")
+                        Text(result.scoreText)
                             .font(.gfDisplay(22).monospacedDigit())
                             .foregroundStyle(outcome == "W" ? Color.gfMint : outcome == "L" ? Color.gfCoral : .white)
                     } else {
@@ -821,7 +820,7 @@ struct FixtureCardRow: View {
         let when = DashboardView.longDate(fixture.date)
         if let result {
             let word = outcome == "W" ? "won" : outcome == "L" ? "lost" : "drew"
-            return "\(fixture.competition), \(when): \(h) \(result.homeGoals), \(a) \(result.awayGoals). You \(word)."
+            return "\(fixture.competition), \(when): \(h) \(result.homeGoals), \(a) \(result.awayGoals). \(result.shootout.map { "Penalties: \($0.scoreText). " } ?? "")You \(word)."
         }
         return "\(fixture.competition), \(when): \(h) versus \(a)\(derbyName.map { ", \($0)" } ?? "")."
     }

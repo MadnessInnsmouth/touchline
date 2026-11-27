@@ -76,6 +76,7 @@ public struct EuropeanFixture: Codable, Identifiable, Hashable {
     public var isPlayed: Bool
     public var homeGoals: Int
     public var awayGoals: Int
+    public var shootout: PenaltyShootout? = nil
 
     public init(
         id: UUID = UUID(),
@@ -245,12 +246,13 @@ public struct EuropeanCompetitionState: Codable, Identifiable, Hashable {
     /// knockout round once the current one is complete.
     public mutating func advanceMatchweek(
         week: Int,
-        simulate: (UUID, UUID) -> (Int, Int)
+        simulate: (UUID, UUID) -> MatchResult?
     ) {
         for idx in fixtures.indices where fixtures[idx].matchweek == week && !fixtures[idx].isPlayed {
-            let (hg, ag) = simulate(fixtures[idx].homeClubId, fixtures[idx].awayClubId)
-            fixtures[idx].homeGoals = hg
-            fixtures[idx].awayGoals = ag
+            guard let result = simulate(fixtures[idx].homeClubId, fixtures[idx].awayClubId) else { continue }
+            fixtures[idx].homeGoals = result.homeGoals
+            fixtures[idx].awayGoals = result.awayGoals
+            fixtures[idx].shootout = result.shootout
             fixtures[idx].isPlayed = true
         }
 
@@ -282,13 +284,17 @@ public struct EuropeanCompetitionState: Codable, Identifiable, Hashable {
         championClubId = tieWinner(first: final.homeClubId, second: final.awayClubId, stage: "Final")
     }
 
-    /// Two-legged tie winner by aggregate (ties broken by away goals then a shootout).
+    /// Knockout winner by aggregate goals or the shootout.
     private func tieWinner(first: UUID, second: UUID, stage: String) -> UUID {
         let legs = fixtures.filter {
             $0.stage == stage &&
             (($0.homeClubId == first && $0.awayClubId == second) ||
              ($0.homeClubId == second && $0.awayClubId == first))
         }.filter { $0.isPlayed }
+
+        if let leg = legs.first(where: { $0.shootout != nil }), let shootout = leg.shootout {
+            return shootout.home > shootout.away ? leg.homeClubId : leg.awayClubId
+        }
 
         // A single-match final has no aggregate or away-goals rule: a draw goes
         // straight to a penalty shootout.
