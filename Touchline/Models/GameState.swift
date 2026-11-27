@@ -2474,7 +2474,7 @@ public final class GameState: Codable {
     }
 
     func beginEditingMatchdayLineup(for fixture: Fixture) {
-        guard let idx = userClubIndex else { return }
+        guard let idx = clubs.firstIndex(where: { $0.isUserClub }) else { return }
         let preview = matchdayUserClub(for: fixture)
         beginMatchOnlyLineup()
         if let preview { clubs[idx].tactics = preview.tactics }
