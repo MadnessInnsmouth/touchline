@@ -88,7 +88,7 @@ struct DatapackListView: View {
                 if case .success(let url) = result, let pack = store.importPack(from: url) {
                     message = "Imported \(pack.name): \(pack.clubCount) clubs and \(pack.playerCount) players."
                 } else {
-                    message = "That file isn't a Touchline datapack."
+                    message = "Could not import this file. Choose a valid Touchline datapack and check that your device has free storage."
                 }
                 refresh()
             }
@@ -103,7 +103,11 @@ struct DatapackListView: View {
             let pack = store.createFromBundled(named: name)
             DispatchQueue.main.async {
                 busy = false
-                message = "Created \(pack.name) with \(pack.leagues.count) leagues, \(pack.clubCount) clubs and \(pack.playerCount) players."
+                if let pack {
+                    message = "Created \(pack.name) with \(pack.leagues.count) leagues, \(pack.clubCount) clubs and \(pack.playerCount) players."
+                } else {
+                    message = "Could not create the datapack."
+                }
                 refresh()
             }
         }
@@ -142,7 +146,11 @@ struct DatapackListView: View {
                 HStack(spacing: 18) {
                     ShareLink(item: store.fileURL(for: name)) { Label("Export", systemImage: "square.and.arrow.up") }
                     Button {
-                        if let copy = store.duplicate(name) { message = "Copied as \(copy.name)." }
+                        if let copy = store.duplicate(name) {
+                            message = "Copied as \(copy.name)."
+                        } else {
+                            message = "Could not duplicate \(name)."
+                        }
                         refresh()
                     } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                     Spacer()
@@ -163,15 +171,17 @@ struct DatapackEditView: View {
     @State private var pack: Datapack?
     @State private var search = ""
     @State private var dirty = false
+    @State private var loadFailed = false
+    @State private var saveFailed = false
 
     var body: some View {
         Group {
             if pack != nil {
                 List {
                     Section(footer: Text("\(pack?.leagues.count ?? 0) leagues · \(pack?.clubCount ?? 0) clubs · \(pack?.playerCount ?? 0) players. Changes are saved when you leave this screen.")) {
-                        ForEach(Array((pack?.leagues ?? []).enumerated()), id: \.offset) { index, league in
-                            if search.isEmpty || league.name.localizedCaseInsensitiveContains(search)
-                                || league.clubs.contains(where: { $0.name.localizedCaseInsensitiveContains(search) }) {
+                        let visibleIndices = visibleLeagueIndices
+                        ForEach(visibleIndices, id: \.self) { index in
+                            if let league = pack?.leagues[index] {
                                 NavigationLink {
                                     LeagueEditView(pack: Binding(get: { pack! }, set: { pack = $0; dirty = true }), leagueIndex: index, search: search)
                                 } label: {
@@ -184,7 +194,8 @@ struct DatapackEditView: View {
                             }
                         }
                         .onDelete { offsets in
-                            pack?.leagues.remove(atOffsets: offsets)
+                            let leagueOffsets = IndexSet(offsets.map { visibleIndices[$0] })
+                            pack?.leagues.remove(atOffsets: leagueOffsets)
                             dirty = true
                         }
                     }
@@ -200,6 +211,8 @@ struct DatapackEditView: View {
                     }
                 }
                 .searchable(text: $search, prompt: "League or club")
+            } else if loadFailed {
+                ContentUnavailableView("Could not open datapack", systemImage: "exclamationmark.triangle")
             } else {
                 ProgressView("Loading…")
             }
@@ -208,13 +221,30 @@ struct DatapackEditView: View {
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            if pack == nil { pack = DatapackStore.shared.load(name) }
+            if pack == nil {
+                pack = DatapackStore.shared.load(name)
+                loadFailed = pack == nil
+            }
         }
         .onDisappear(perform: save)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save", action: save).disabled(!dirty)
             }
+        }
+        .alert("Could not save datapack", isPresented: $saveFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Check that your device has free storage, then try saving again.")
+        }
+    }
+
+    private var visibleLeagueIndices: [Int] {
+        guard let leagues = pack?.leagues else { return [] }
+        return leagues.indices.filter { index in
+            let league = leagues[index]
+            return search.isEmpty || league.name.localizedCaseInsensitiveContains(search)
+                || league.clubs.contains { $0.name.localizedCaseInsensitiveContains(search) }
         }
     }
 
@@ -236,7 +266,10 @@ struct DatapackEditView: View {
 
     private func save() {
         guard dirty, let pack else { return }
-        DatapackStore.shared.save(pack)
+        guard DatapackStore.shared.save(pack) else {
+            saveFailed = true
+            return
+        }
         dirty = false
     }
 }
@@ -258,7 +291,7 @@ struct LeagueEditView: View {
                     TextField("League name", text: $pack.leagues[leagueIndex].name)
                         .accessibilityLabel("League name")
                 }
-                Section(header: Text("Clubs"), footer: Text("Swipe a club to delete it. A league needs an even number of at least four clubs to play a season.")) {
+                Section(header: Text("Clubs"), footer: Text("Swipe a club to delete it. A league needs at least two clubs to produce fixtures. With an odd number, one club sits out each round.")) {
                     ForEach(Array(pack.leagues[leagueIndex].clubs.enumerated()), id: \.offset) { index, club in
                         NavigationLink {
                             ClubEditView(pack: $pack, leagueIndex: leagueIndex, clubIndex: index)

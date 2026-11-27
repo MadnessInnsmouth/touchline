@@ -21,6 +21,8 @@ public struct Datapack: Codable {
 public final class DatapackStore {
     public static let shared = DatapackStore()
     private static let activeKey = "gfActiveDatapack"
+    private static let fileSuffix = ".gfpack.json"
+    private let creationLock = NSLock()
     private var cache: (name: String, pack: Datapack)?
 
     private var directory: URL {
@@ -33,30 +35,37 @@ public final class DatapackStore {
 
     public func fileURL(for name: String) -> URL {
         let safe = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-        return directory.appendingPathComponent("\(safe).gfpack.json")
+        return directory.appendingPathComponent(safe + Self.fileSuffix)
     }
 
     /// Names of the saved packs, alphabetically.
     public func list() -> [String] {
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.lastPathComponent.hasSuffix(".gfpack.json") }
-            .map { $0.lastPathComponent.replacingOccurrences(of: ".gfpack.json", with: "") }
+        return files.filter { $0.lastPathComponent.hasSuffix(Self.fileSuffix) }
+            .map { String($0.lastPathComponent.dropLast(Self.fileSuffix.count)) }
             .sorted()
     }
 
     public func load(_ name: String) -> Datapack? {
         if let cache, cache.name == name { return cache.pack }
         guard let data = try? Data(contentsOf: fileURL(for: name)),
-              let pack = try? JSONDecoder().decode(Datapack.self, from: data) else { return nil }
+              var pack = try? JSONDecoder().decode(Datapack.self, from: data) else { return nil }
+        // Older builds stored the original name in JSON, even if the filename was sanitized.
+        pack.name = name
         return pack
     }
 
     @discardableResult
     public func save(_ pack: Datapack) -> Bool {
+        guard write(pack) else { return false }
+        if cache?.name == pack.name { cache = (pack.name, pack) }
+        return true
+    }
+
+    private func write(_ pack: Datapack) -> Bool {
         guard let data = try? JSONEncoder().encode(pack) else { return false }
         do {
             try data.write(to: fileURL(for: pack.name), options: .atomic)
-            if cache?.name == pack.name { cache = (pack.name, pack) }
             return true
         } catch {
             return false
@@ -91,19 +100,17 @@ public final class DatapackStore {
     }
 
     /// A new pack holding the game's current data, ready to edit.
-    public func createFromBundled(named name: String) -> Datapack {
+    public func createFromBundled(named name: String) -> Datapack? {
         let leagues = LeagueTier.allCases.compactMap { DataLoader.bundledLeague(for: $0) }
-        let pack = Datapack(name: uniqueName(name), leagues: leagues)
-        save(pack)
-        return pack
+        guard !leagues.isEmpty else { return nil }
+        return storeNew(Datapack(name: name, leagues: leagues))
     }
 
     /// A copy of an existing pack under a new name.
     public func duplicate(_ name: String) -> Datapack? {
         guard var pack = load(name) else { return nil }
-        pack.name = uniqueName(name + " copy")
-        save(pack)
-        return pack
+        pack.name = name + " copy"
+        return storeNew(pack)
     }
 
     /// Reads a pack from a file chosen by the user and stores it.
@@ -115,18 +122,27 @@ public final class DatapackStore {
         guard let data = try? Data(contentsOf: url),
               var pack = try? JSONDecoder().decode(Datapack.self, from: data),
               !pack.leagues.isEmpty else { return nil }
-        pack.name = uniqueName(pack.name.isEmpty ? "Imported" : pack.name)
-        save(pack)
-        return pack
+        if pack.name.isEmpty { pack.name = "Imported" }
+        return storeNew(pack)
+    }
+
+    private func storeNew(_ source: Datapack) -> Datapack? {
+        creationLock.lock()
+        defer { creationLock.unlock() }
+        var pack = source
+        pack.name = uniqueName(source.name)
+        return write(pack) ? pack : nil
     }
 
     private func uniqueName(_ base: String) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
         let root = trimmed.isEmpty ? "My Datapack" : trimmed
-        let existing = Set(list())
-        if !existing.contains(root) { return root }
+        let existing = Set(list().map { $0.lowercased() })
+        if !existing.contains(root.lowercased()) { return root }
         var n = 2
-        while existing.contains("\(root) \(n)") { n += 1 }
+        while existing.contains("\(root) \(n)".lowercased()) { n += 1 }
         return "\(root) \(n)"
     }
 }
