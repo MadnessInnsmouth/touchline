@@ -22,7 +22,9 @@ open Touchline.xcodeproj
 
 ## Releases and tests
 
-Every push to `main` runs **Build iOS App** in GitHub Actions. Crash tests in `TouchlineUITests` play a live match through half-time, an instant result, an owner watching a match and half a season on an iPhone simulator; if any fail, nothing is published. The unsigned `Touchline.ipa` is then attached to a GitHub Release.
+Every push to `main` runs **Build iOS App** and publishes an unsigned `Touchline.ipa` on GitHub Releases. To test before merging, push to a `preview/*` branch or the current `codex/touchline-stability` review branch. Its build is published as a commit-specific GitHub prerelease, with the IPA also available as a workflow artifact. You can also run the workflow manually on a branch.
+
+The `TouchlineUITests` suite covers live play through half-time, an instant result, an owner watching a match and a half-season career. Run it from the Touchline scheme in Xcode on an iPhone simulator.
 
 After each release, run `node tools/publish-website.js` to put the new IPA on the Gooners LLC website.
 

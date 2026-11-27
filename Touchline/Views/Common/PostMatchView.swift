@@ -16,13 +16,13 @@ public struct PostMatchView: View {
 
     /// Full time in three screens: the report, Player of the Match, then the
     /// rest of the round.
-    private enum Step { case report, playerOfMatch, results }
+    private enum Step: Hashable { case report, playerOfMatch, results }
     @State private var step: Step = .report
     @State private var playedVerdict = false
     /// The player-of-the-match profile opens over this screen, so closing it
     /// comes straight back here.
     @State private var profilePlayerId: UUID?
-    @AccessibilityFocusState private var headingFocused: Bool
+    @AccessibilityFocusState(for: .voiceOver) private var focusedStep: Step?
 
     public var body: some View {
         ScrollView {
@@ -38,7 +38,7 @@ public struct PostMatchView: View {
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(fullTimeSummary(res: res, home: home, away: away))
                             .accessibilityAddTraits(.isHeader)
-                            .accessibilityFocused($headingFocused)
+                            .accessibilityFocused($focusedStep, equals: .report)
                         matchFactsCard(res: res, home: home, away: away)
                         ratingsCard(res: res)
                         statsCard(res: res, home: home, away: away)
@@ -47,6 +47,8 @@ public struct PostMatchView: View {
                             playerOfMatchScreen(potm, res: res)
                         } else {
                             Text("No player of the match was recorded.")
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityFocused($focusedStep, equals: .playerOfMatch)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 60)
                         }
@@ -55,7 +57,7 @@ public struct PostMatchView: View {
                             .font(.gfDisplay(20))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityAddTraits(.isHeader)
-                            .accessibilityFocused($headingFocused)
+                            .accessibilityFocused($focusedStep, equals: .results)
                         elsewhereCard(fixture: fixture)
                         tableCard(fixture: fixture)
                     }
@@ -66,13 +68,14 @@ public struct PostMatchView: View {
                                        description: Text("Play a match to see the full-time recap."))
             }
         }
+        .id(step)
         .safeAreaInset(edge: .bottom) {
             Group {
                 if step == .results {
                     actions
                 } else {
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { step = step == .report ? .playerOfMatch : .results }
+                        step = step == .report ? .playerOfMatch : .results
                     } label: {
                         Text("Continue")
                     }
@@ -87,15 +90,22 @@ public struct PostMatchView: View {
         .navigationTitle(step == .report ? "Full Time" : step == .playerOfMatch ? "Player of the Match" : "Results")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .onChange(of: step) { _, _ in headingFocused = true }
+        .task(id: step) { [step] in
+            // Wait for the new heading to enter the accessibility tree.
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+                try Task.checkCancellation()
+                focusedStep = step
+            } catch {
+                // The report closed or another page took its place.
+            }
+        }
         .sheet(isPresented: Binding(get: { profilePlayerId != nil }, set: { if !$0 { profilePlayerId = nil } })) {
             if let id = profilePlayerId {
                 NavigationStack { PlayerDetailView(playerId: id) }
             }
         }
         .onAppear {
-            // VoiceOver starts on the full-time score at the top.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { headingFocused = true }
             guard !playedVerdict,
                   let fixture = gameState.activeMatchFixture,
                   let res = fixture.result,
@@ -365,7 +375,7 @@ public struct PostMatchView: View {
             Text("Player of the Match")
                 .font(.gfDisplay(26))
                 .accessibilityAddTraits(.isHeader)
-                .accessibilityFocused($headingFocused)
+                .accessibilityFocused($focusedStep, equals: .playerOfMatch)
                 .padding(.top, 10)
             Button {
                 profilePlayerId = potm.player.id

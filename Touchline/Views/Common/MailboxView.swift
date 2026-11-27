@@ -14,9 +14,12 @@ public struct MailboxView: View {
     @Environment(GameState.self) private var gameState
     @State private var filter: NewsCategory?
     @State private var unreadOnly = false
+    @State private var confirmingDeleteAll = false
+
+    private var inbox: [NewsItem] { gameState.news.filter { $0.isInboxMessage } }
 
     private var items: [NewsItem] {
-        var result = gameState.news.filter { $0.isInboxMessage }
+        var result = inbox
         if unreadOnly { result = result.filter { !$0.isRead } }
         if let filter = filter { result = result.filter { $0.category == filter } }
         return result
@@ -32,11 +35,17 @@ public struct MailboxView: View {
                     Spacer()
                     Button("Mark All Read") {
                         gameState.markAllMailRead()
+                        try? SaveManager.shared.autoSave(gameState: gameState)
                     }
+                    .buttonStyle(.borderless)
                     .font(.caption)
                     .disabled(gameState.unreadMailCount == 0)
                     .accessibilityLabel("Mark all messages as read")
                 }
+                Button("Delete All Messages", role: .destructive) {
+                    confirmingDeleteAll = true
+                }
+                .disabled(inbox.isEmpty)
                 // One dropdown for what to show, instead of a row of chips.
                 Menu {
                     Picker("Show", selection: $filter) {
@@ -76,6 +85,18 @@ public struct MailboxView: View {
                             } label: {
                                 MailSubjectRow(item: item)
                             }
+                            .accessibilityActions {
+                                if !item.isRead {
+                                    Button("Mark as Read") {
+                                        gameState.markMailRead(id: item.id)
+                                        try? SaveManager.shared.autoSave(gameState: gameState)
+                                    }
+                                }
+                                Button("Delete", role: .destructive) {
+                                    gameState.deleteMail(id: item.id)
+                                    try? SaveManager.shared.autoSave(gameState: gameState)
+                                }
+                            }
                             .listRowBackground(item.isRead ? Color.gfSurface : Color(hex: "1E3E70"))
                         }
                     }
@@ -86,6 +107,15 @@ public struct MailboxView: View {
         .stadiumBackground()
         .navigationTitle("Messages")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete all messages?", isPresented: $confirmingDeleteAll) {
+            Button("Delete All", role: .destructive) {
+                gameState.deleteAllMail()
+                try? SaveManager.shared.autoSave(gameState: gameState)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes every inbox message, including messages hidden by your filters. Transfer offers remain available in Transfers.")
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") {

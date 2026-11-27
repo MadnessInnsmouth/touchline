@@ -6140,7 +6140,7 @@ public final class GameState: Codable {
 
     /// Marks every message in the inbox as read.
     public func markAllMailRead() {
-        for idx in news.indices where !news[idx].isRead {
+        for idx in news.indices where news[idx].isInboxMessage && !news[idx].isRead {
             news[idx].isRead = true
         }
     }
@@ -6149,6 +6149,16 @@ public final class GameState: Codable {
     public func markMailRead(id: UUID) {
         guard let idx = news.firstIndex(where: { $0.id == id }) else { return }
         news[idx].isRead = true
+    }
+
+    /// Removes a message without altering any transfer offer it references.
+    public func deleteMail(id: UUID) {
+        news.removeAll { $0.id == id && $0.isInboxMessage }
+    }
+
+    /// Clears club correspondence while preserving the world news feed.
+    public func deleteAllMail() {
+        news.removeAll { $0.isInboxMessage }
     }
 
     /// Seeds the manager's inbox with the board's welcome and season objectives the

@@ -371,6 +371,7 @@ struct ClubPurchaseView: View {
     @State private var search = ""
     @State private var choice: ClubForSale?
     @State private var confirmRetire = false
+    @State private var retirementFailed = false
 
     private var results: [ClubForSale] {
         let all = gameState.clubsForSale
@@ -434,11 +435,20 @@ struct ClubPurchaseView: View {
         }
         .confirmationDialog("Retire from football?", isPresented: $confirmRetire, titleVisibility: .visible) {
             Button("Retire and end this career", role: .destructive) {
-                try? SaveManager.shared.deleteSave(for: .autoSave)
-                gameState.resetForNewCareer(mode: .createClub)
-                gameState.currentScreen = .mainMenu
+                do {
+                    try SaveManager.shared.deleteSave(for: .autoSave)
+                    gameState.resetForNewCareer(mode: .createClub)
+                    gameState.currentScreen = .mainMenu
+                } catch {
+                    retirementFailed = true
+                }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .alert("Could not retire", isPresented: $retirementFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The autosave could not be deleted. Try again.")
         }
     }
 }

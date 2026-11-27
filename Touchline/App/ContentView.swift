@@ -4200,8 +4200,14 @@ public struct SettingsView: View {
         ) { slot in
             Button("Delete \(slot.displayName)", role: .destructive) {
                 slotPendingDelete = nil
-                try? SaveManager.shared.deleteSave(for: slot)
-                refreshSlotMetadata(); refreshStorage()
+                do {
+                    try SaveManager.shared.deleteSave(for: slot)
+                    refreshSlotMetadata()
+                    refreshStorage()
+                } catch {
+                    alertMessage = "Could not delete \(slot.displayName). \(error.localizedDescription)"
+                    showAlert = true
+                }
             }
             Button("Cancel", role: .cancel) { slotPendingDelete = nil }
         } message: { _ in

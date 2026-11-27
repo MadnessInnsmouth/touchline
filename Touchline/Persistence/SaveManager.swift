@@ -105,16 +105,14 @@ public final class SaveManager {
     public static let shared = SaveManager()
     
     private let fileManager = FileManager.default
-    private let decoder: JSONDecoder
-    
-    public init() {
-        // Saves are written as compact JSON (see `write`): the world holds
-        // thousands of players, and pretty printing roughly doubled both the
-        // file size and the encoding time.
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
+    public init() {}
+
+    private func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
-    
+
     // MARK: - File URL Helpers
     
     private func documentsDirectory() throws -> URL {
@@ -313,7 +311,7 @@ public final class SaveManager {
         
         do {
             let data = try SaveManager.unpack(Data(contentsOf: targetUrl))
-            let envelope = try decoder.decode(SaveEnvelope.self, from: data)
+            let envelope = try makeDecoder().decode(SaveEnvelope.self, from: data)
             return envelope.state
         } catch {
             throw SaveManagerError.decodingFailed(error.localizedDescription)
@@ -332,6 +330,7 @@ public final class SaveManager {
               fileManager.fileExists(atPath: targetUrl.path) else {
             return nil
         }
+        let decoder = makeDecoder()
         if let sidecar = try? Data(contentsOf: metadataURL(for: targetUrl)),
            let meta = try? decoder.decode(SaveSlotMetadata.self, from: sidecar) {
             return meta
@@ -366,10 +365,18 @@ public final class SaveManager {
     }
 
     public func deleteSave(for slot: SaveSlot) throws {
-        let url = try fileURL(for: slot)
-        if fileManager.fileExists(atPath: url.path) {
-            try fileManager.removeItem(at: url)
+        if slot == .autoSave {
+            pendingLock.lock()
+            pendingAutoSave = nil
+            pendingLock.unlock()
         }
-        try? fileManager.removeItem(at: metadataURL(for: url))
+        // An autosave already being encoded must finish before the file is removed.
+        try writeQueue.sync {
+            let url = try fileURL(for: slot)
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+            try? fileManager.removeItem(at: metadataURL(for: url))
+        }
     }
 }
