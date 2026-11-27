@@ -85,6 +85,7 @@ public struct MatchSettings: Codable, Hashable {
     /// Before each match the assistant rests tired starters for fresh squad
     /// players of similar quality (manager mode).
     public var assistantRotatesTiredPlayers: Bool
+    public var autoSelectMatchdayLineup: Bool
     /// Continue shows the days ticking by on an animated calendar rather than
     /// jumping straight to the next match day.
     public var animateCalendar: Bool
@@ -102,7 +103,8 @@ public struct MatchSettings: Codable, Hashable {
         assistantRotatesTiredPlayers: Bool = false,
         animateCalendar: Bool = true,
         pauseCalendarForMail: Bool = true,
-        stopForInjuries: Bool = true
+        stopForInjuries: Bool = true,
+        autoSelectMatchdayLineup: Bool = false
     ) {
         self.speed = speed
         self.stopAtHalfTime = stopAtHalfTime
@@ -112,11 +114,12 @@ public struct MatchSettings: Codable, Hashable {
         self.animateCalendar = animateCalendar
         self.pauseCalendarForMail = pauseCalendarForMail
         self.stopForInjuries = stopForInjuries
+        self.autoSelectMatchdayLineup = autoSelectMatchdayLineup
     }
 
     private enum CodingKeys: String, CodingKey {
         case speed, stopAtHalfTime, autoSubTiming, autoSubAggression, assistantRotatesTiredPlayers, animateCalendar, pauseCalendarForMail
-        case stopForInjuries, controlVersion
+        case stopForInjuries, controlVersion, autoSelectMatchdayLineup
     }
 
     /// Version 2: the manager makes his own substitutions unless he hands
@@ -126,6 +129,7 @@ public struct MatchSettings: Codable, Hashable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(autoSelectMatchdayLineup, forKey: .autoSelectMatchdayLineup)
         try c.encode(speed, forKey: .speed)
         try c.encode(stopAtHalfTime, forKey: .stopAtHalfTime)
         try c.encode(autoSubTiming, forKey: .autoSubTiming)
@@ -140,6 +144,7 @@ public struct MatchSettings: Codable, Hashable {
     /// Tolerant decoding so settings saved by older versions still load.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        autoSelectMatchdayLineup = try c.decodeIfPresent(Bool.self, forKey: .autoSelectMatchdayLineup) ?? false
         speed = try c.decodeIfPresent(Speed.self, forKey: .speed) ?? .normal
         stopAtHalfTime = try c.decodeIfPresent(Bool.self, forKey: .stopAtHalfTime) ?? true
         autoSubTiming = try c.decodeIfPresent(AutoSubTiming.self, forKey: .autoSubTiming) ?? .secondHalf

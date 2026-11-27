@@ -1407,9 +1407,16 @@ public struct TacticsView: View {
                      name: { $0 == .off ? "None: I decide" : $0 == .halfTime ? "Half-time" : $0 == .secondHalf ? "From 60'" : "Throughout" }) { t in
                 gameState.matchSettings.autoSubTiming = t
             }
-            chipGrid("Team Selection", options: [false, true], selected: gameState.matchSettings.assistantRotatesTiredPlayers,
-                     name: { $0 ? "Assistant rests tired" : "I pick the team" }) { v in
-                gameState.matchSettings.assistantRotatesTiredPlayers = v
+            Toggle("Auto-pick formation and lineup every match", isOn: Binding(
+                get: { gameState.matchSettings.autoSelectMatchdayLineup },
+                set: { gameState.setAutomaticMatchdaySelection($0) }
+            ))
+            .accessibilityHint("Picks your formation, starting eleven and bench for each opponent")
+            if !gameState.matchSettings.autoSelectMatchdayLineup {
+                Toggle("Assistant rests tired starters", isOn: Binding(
+                    get: { gameState.matchSettings.assistantRotatesTiredPlayers },
+                    set: { gameState.matchSettings.assistantRotatesTiredPlayers = $0 }
+                ))
             }
             Text("Every choice is a trade-off. Attacking mentality makes chances and leaves gaps for counter-attacks; a high press wins the ball high but tires legs and leaves space behind; a low block concedes shots, but few good ones; short passing keeps the ball, direct play makes more (poorer) chances. Players are rated for the position they play, so a player out of position is a weakness.")
                 .font(.caption)
@@ -2653,7 +2660,7 @@ public struct MatchDayView: View {
                         oddsRow(fixture: fixture)
                         MatchPreviewCard(fixture: fixture, home: home, away: away)
                     case .team:
-                        lineupCard
+                        lineupCard(fixture: fixture)
                     case .opponent:
                         let opponent = home.isUserClub ? away : home
                         teamSheet(opponent)
@@ -2797,13 +2804,13 @@ public struct MatchDayView: View {
     }
 
     @ViewBuilder
-    private var lineupCard: some View {
-        if let club = gameState.userClub {
+    private func lineupCard(fixture: Fixture) -> some View {
+        if let club = gameState.matchdayUserClub(for: fixture) {
             VStack(spacing: 12) {
                 teamSheet(club)
                 Button {
                     // Changes from here on are for this match only.
-                    gameState.beginMatchOnlyLineup()
+                    gameState.beginEditingMatchdayLineup(for: fixture)
                     editingLineup = true
                 } label: {
                     Label("Manage Lineup", systemImage: "arrow.left.arrow.right")
@@ -4065,10 +4072,17 @@ public struct SettingsView: View {
                 }
                 .accessibilityHint("How readily tired players are rotated off")
 
+                Toggle("Auto-pick formation and lineup every match", isOn: Binding(
+                    get: { gameState.matchSettings.autoSelectMatchdayLineup },
+                    set: { gameState.setAutomaticMatchdaySelection($0) }
+                ))
+                .accessibilityHint("Picks your formation, starting eleven and bench for each opponent in club manager mode")
+
                 Toggle("Assistant rests tired starters", isOn: Binding(
                     get: { gameState.matchSettings.assistantRotatesTiredPlayers },
                     set: { gameState.matchSettings.assistantRotatesTiredPlayers = $0 }
                 ))
+                .disabled(gameState.matchSettings.autoSelectMatchdayLineup)
                 .accessibilityHint("Before each match, starters short of fitness are replaced by fresh squad players of similar quality")
 
                 Toggle("Animated calendar", isOn: Binding(

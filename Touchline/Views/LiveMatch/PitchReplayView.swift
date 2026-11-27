@@ -776,7 +776,8 @@ public struct LiveMatchView: View {
     }
 
     private var scoreText: String {
-        "\(currentHomeGoals) - \(currentAwayGoals)"
+        if !inProgress, minute >= finalMinute, let result { return result.scoreText }
+        return "\(currentHomeGoals) - \(currentAwayGoals)"
     }
 
     private func prepare() {

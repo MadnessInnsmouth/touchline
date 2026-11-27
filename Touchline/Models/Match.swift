@@ -11,12 +11,20 @@ import Foundation
 
 // MARK: - Match Result
 
+public struct PenaltyShootout: Codable, Hashable {
+    public let home: Int
+    public let away: Int
+
+    public var scoreText: String { "\(home)-\(away) on penalties" }
+}
+
 public struct MatchResult: Codable, Identifiable, Hashable {
     public let id: UUID
     public var homeClubId: UUID
     public var awayClubId: UUID
     public var homeGoals: Int
     public var awayGoals: Int
+    public var shootout: PenaltyShootout?
     public var events: [MatchEvent]
     public var matchWeek: Int
     public var competition: String       // e.g., "Premier League", "FA Cup Third Round"
@@ -48,6 +56,7 @@ public struct MatchResult: Codable, Identifiable, Hashable {
         self.awayClubId = awayClubId
         self.homeGoals = homeGoals
         self.awayGoals = awayGoals
+        self.shootout = nil
         self.events = events
         self.matchWeek = matchWeek
         self.competition = competition
@@ -66,7 +75,7 @@ public struct MatchResult: Codable, Identifiable, Hashable {
     // zeroed stat blocks keeps saves small; decoding treats missing keys as
     // empty, so older saves still load.
     private enum CodingKeys: String, CodingKey {
-        case id, homeClubId, awayClubId, homeGoals, awayGoals, events, matchWeek
+        case id, homeClubId, awayClubId, homeGoals, awayGoals, shootout, events, matchWeek
         case competition, date, attendance, homeStats, awayStats, playerRatings, manOfTheMatch
     }
 
@@ -77,6 +86,7 @@ public struct MatchResult: Codable, Identifiable, Hashable {
         awayClubId = try c.decode(UUID.self, forKey: .awayClubId)
         homeGoals = try c.decode(Int.self, forKey: .homeGoals)
         awayGoals = try c.decode(Int.self, forKey: .awayGoals)
+        shootout = try c.decodeIfPresent(PenaltyShootout.self, forKey: .shootout)
         events = try c.decodeIfPresent([MatchEvent].self, forKey: .events) ?? []
         matchWeek = try c.decodeIfPresent(Int.self, forKey: .matchWeek) ?? 0
         competition = try c.decodeIfPresent(String.self, forKey: .competition) ?? ""
@@ -95,6 +105,7 @@ public struct MatchResult: Codable, Identifiable, Hashable {
         try c.encode(awayClubId, forKey: .awayClubId)
         try c.encode(homeGoals, forKey: .homeGoals)
         try c.encode(awayGoals, forKey: .awayGoals)
+        try c.encodeIfPresent(shootout, forKey: .shootout)
         if !events.isEmpty { try c.encode(events, forKey: .events) }
         try c.encode(matchWeek, forKey: .matchWeek)
         try c.encode(competition, forKey: .competition)
@@ -109,14 +120,20 @@ public struct MatchResult: Codable, Identifiable, Hashable {
     // MARK: - Computed Properties
     
     public var scoreText: String {
-        return "\(homeGoals) - \(awayGoals)"
+        return "\(homeGoals) - \(awayGoals)" + (shootout.map { " (\($0.scoreText))" } ?? "")
     }
     
     public var isDraw: Bool {
-        return homeGoals == awayGoals
+        return homeGoals == awayGoals && shootoutWinnerClubId == nil
     }
     
+    public var shootoutWinnerClubId: UUID? {
+        guard let shootout, shootout.home != shootout.away else { return nil }
+        return shootout.home > shootout.away ? homeClubId : awayClubId
+    }
+
     public var winnerClubId: UUID? {
+        if let winner = shootoutWinnerClubId { return winner }
         if homeGoals > awayGoals {
             return homeClubId
         } else if awayGoals > homeGoals {
@@ -128,15 +145,9 @@ public struct MatchResult: Codable, Identifiable, Hashable {
     
     /// Returns "W", "D", or "L" from the vantage point of a designated club.
     public func outcomeLetter(for clubId: UUID) -> String {
-        if homeGoals == awayGoals {
-            return "D"
-        }
-        if clubId == homeClubId {
-            return homeGoals > awayGoals ? "W" : "L"
-        } else if clubId == awayClubId {
-            return awayGoals > homeGoals ? "W" : "L"
-        }
-        return "-"
+        guard clubId == homeClubId || clubId == awayClubId else { return "-" }
+        guard let winner = winnerClubId else { return "D" }
+        return winner == clubId ? "W" : "L"
     }
     
     /// A slimmed copy for matches the user did not play in. Keeps the score,

@@ -133,14 +133,12 @@ public struct Fixture: Codable, Identifiable, Hashable {
     public var isCupTie: Bool { cupRound != nil }
     public var isEuropean: Bool { europeanFixtureId != nil }
 
-    /// The club that went through, for a played cup tie. Shootout winners are
-    /// credited with an extra goal by the match engine, so goals decide it.
+    /// The club that won the match or its shootout.
     public var winnerClubId: UUID? {
-        guard isPlayed, let result else { return nil }
-        if result.homeGoals == result.awayGoals { return nil }
-        return result.homeGoals > result.awayGoals ? homeClubId : awayClubId
+        isPlayed ? result?.winnerClubId : nil
     }
     
+
     public func involves(clubId: UUID) -> Bool {
         return homeClubId == clubId || awayClubId == clubId
     }

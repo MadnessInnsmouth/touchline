@@ -550,18 +550,16 @@ public struct MatchEngine {
 
         let all = state.home.allPlayers + state.away.allPlayers
         let motm = all.filter { $0.minutesPlayed >= 20 || $0.goals > 0 }.max { $0.currentRating < $1.currentRating }
-        var homeGoals = state.home.goals
-        var awayGoals = state.away.goals
-        if let shootout {
-            // Recorded as a one-goal win, as elsewhere in the game.
-            if shootout.0 > shootout.1 { homeGoals += 1 } else { awayGoals += 1 }
-        }
-        let ft = Commentary.fullTimeSummary(home: homeClub, away: awayClub, homeGoals: homeGoals, awayGoals: awayGoals, motm: motm?.player)
-        state.events.append(MatchEvent(minute: max(1, minute - 1), type: .fullTime, shortText: ft.short, detailText: ft.detail, isHomeTeam: true))
+        let ft = Commentary.fullTimeSummary(home: homeClub, away: awayClub, homeGoals: finalHome, awayGoals: finalAway, motm: motm?.player)
+        let shootoutSummary = shootout.map {
+            let winner = $0.0 > $0.1 ? homeClub.name : awayClub.name
+            return " \(winner) win the shootout. Penalties: \(homeClub.name) \($0.0), \(awayClub.name) \($0.1)."
+        } ?? ""
+        state.events.append(MatchEvent(minute: max(1, minute - 1), type: .fullTime, shortText: ft.short,
+                                       detailText: ft.detail + shootoutSummary, isHomeTeam: true))
 
         var result = makeResult(state, homeClub: homeClub, awayClub: awayClub, config: config, motm: motm?.player.id)
-        result.homeGoals = homeGoals
-        result.awayGoals = awayGoals
+        result.shootout = shootout.map { PenaltyShootout(home: $0.0, away: $0.1) }
 
         applyMatchToClub(club: &homeClub, players: state.home.allPlayers, opponentGoals: state.away.goals, motmId: motm?.player.id)
         applyMatchToClub(club: &awayClub, players: state.away.allPlayers, opponentGoals: state.home.goals, motmId: motm?.player.id)
@@ -700,6 +698,39 @@ public struct MatchEngine {
         }
         return Setup(attack: attack, midfield: midfield, defence: defence, keeper: keeper, mentality: mentality,
                      tactics: club.tactics, pace: paceN > 0 ? paceSum / paceN : 60)
+    }
+
+    /// Compares viable XIs using the engine's positional strengths and the
+    /// opponent's prepared shape. Keep other tactical instructions intact.
+    static func selectMatchdayLineup(for club: Club, against opponent: Club, isHome: Bool,
+                                    config: SimulationConfig) -> Tactics {
+        let opposing = setup(SideState(club: opponent), club: opponent, isHome: !isHome,
+                             config: config, minute: 1, goalDiff: 0, isUserSide: false)
+        func threat(_ attack: Setup, against defence: Setup) -> Double {
+            let creation = attack.attack * 0.6 + attack.midfield * 0.4
+            let resistance = defence.defence * 0.6 + defence.midfield * 0.25 + defence.keeper * 0.15
+            let ratio = max(0.01, creation / max(1, resistance))
+            return pow(ratio, 2)
+        }
+        var best = club.tactics
+        var bestScore = -Double.infinity
+        let original = club.tactics.formation
+        for formation in [original] + FormationPreset.allCases.filter({ $0 != original }) {
+            var candidate = club
+            candidate.tactics.formation = formation
+            candidate.autoPickStartingXI()
+            let own = setup(SideState(club: candidate), club: candidate, isHome: isHome,
+                            config: config, minute: 1, goalDiff: 0, isUserSide: true)
+            let ratio = max(0.01, own.midfield / max(1, opposing.midfield))
+            let share = min(0.72, max(0.28, ratio / (1 + ratio)))
+            let score = share * threat(own, against: opposing)
+                - (1 - share) * threat(opposing, against: own)
+            if score > bestScore {
+                best = candidate.tactics
+                bestScore = score
+            }
+        }
+        return best
     }
 
     private static func mentalityIndex(_ m: Mentality) -> Int {
@@ -1454,7 +1485,7 @@ public struct MatchEngine {
         var round = 1
         while round <= 30 {
             if Double.random(in: 0..<1) < chance(homeTakers[(round - 1) % homeTakers.count], awayGk) { h += 1 }
-            if round <= 5 && h > a + (6 - round) { break }
+            if round <= 5 && (h > a + (6 - round) || a > h + (5 - round)) { break }
             if Double.random(in: 0..<1) < chance(awayTakers[(round - 1) % awayTakers.count], homeGk) { a += 1 }
             if round >= 5 {
                 if h != a { break }
