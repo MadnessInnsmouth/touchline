@@ -2,11 +2,11 @@ name: Build iOS App
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "codex/touchline-stability", "preview/**" ]
   workflow_dispatch:
     inputs:
       version:
-        description: "Explicit release version (e.g. 1.2.0). Leave blank to auto-increment."
+        description: "Optional version for the IPA (e.g. 1.2.0). Leave blank to auto-increment."
         required: false
         default: ""
 
@@ -15,12 +15,14 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build & Package Touchline
     runs-on: macos-26-intel
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout Source Code
@@ -31,18 +33,24 @@ jobs:
 
       - name: Determine Release Version
         id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           # Explicit override: workflow_dispatch input, or a commit message marker
           # like "[release 1.4.0]". Otherwise bump the minor of the highest v* tag
           # (e.g. v0.3.0 -> v0.4.0).
-          EXPLICIT="${{ github.event.inputs.version }}"
+          EXPLICIT="$REQUESTED_VERSION"
           if [ -z "$EXPLICIT" ]; then
             EXPLICIT=$(git log -1 --pretty=%B | grep -oE '\[release [0-9]+\.[0-9]+\.[0-9]+\]' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
           fi
           if [ -n "$EXPLICIT" ]; then
+            if ! [[ "$EXPLICIT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Version must be in major.minor.patch format."
+              exit 1
+            fi
             NEXT="$EXPLICIT"
           else
-            LATEST=$(git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1)
+            LATEST=$(git tag -l 'v*' | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
             if [ -z "$LATEST" ]; then
               NEXT="0.1.0"
             else
@@ -167,9 +175,8 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    # Pushes to main publish automatically; a manual run publishes from any
-    # branch when an explicit version is given.
-    if: github.ref == 'refs/heads/main' || github.event.inputs.version != ''
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Source Code
@@ -184,35 +191,20 @@ jobs:
           name: Touchline-iOS-IPA
           path: build-output
 
-      - name: Determine Release Version
-        id: version
-        run: |
-          EXPLICIT="${{ github.event.inputs.version }}"
-          if [ -z "$EXPLICIT" ]; then
-            EXPLICIT=$(git log -1 --pretty=%B | grep -oE '\[release [0-9]+\.[0-9]+\.[0-9]+\]' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-          fi
-          if [ -n "$EXPLICIT" ]; then
-            NEXT="$EXPLICIT"
-          else
-            LATEST=$(git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1)
-            if [ -z "$LATEST" ]; then
-              NEXT="0.1.0"
-            else
-              MAJOR=$(echo "$LATEST" | cut -d. -f1)
-              MINOR=$(echo "$LATEST" | cut -d. -f2)
-              NEXT="$MAJOR.$((MINOR + 1)).0"
-            fi
-          fi
-          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
-          echo "Publishing release: v$NEXT"
-
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v$VERSION"
-          TITLE="Touchline $TAG"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            TAG="v$VERSION"
+            TITLE="Touchline $TAG"
+            RELEASE_FLAGS=(--latest)
+          else
+            TAG="preview-${GITHUB_SHA::12}"
+            TITLE="Touchline Preview (${GITHUB_SHA::7})"
+            RELEASE_FLAGS=(--prerelease --latest=false)
+          fi
           NOTES_FILE="$RUNNER_TEMP/notes.md"
           if [ -f "release-notes/$TAG.md" ]; then
             cp "release-notes/$TAG.md" "$NOTES_FILE"
@@ -243,7 +235,7 @@ jobs:
           else
             gh release create "$TAG" \
               --target "$GITHUB_SHA" \
-              --latest \
+              "${RELEASE_FLAGS[@]}" \
               --title "$TITLE" \
               --notes-file "$NOTES_FILE" \
               "build-output/Touchline.ipa" \
