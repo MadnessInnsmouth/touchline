@@ -292,7 +292,7 @@ public struct MatchEngine {
 
         /// The last minute played.
         public var minutePlayed: Int { max(0, minute - 1) }
-        public var isExtraTime: Bool { maxMinute > 100 }
+        public var isExtraTime: Bool { maxMinute > 90 + secondHalfStoppage }
         public var homeOnPitch: [UUID] { home.active.map { $0.player.id } }
         public var awayOnPitch: [UUID] { away.active.map { $0.player.id } }
         public var homeBenchIds: [UUID] { home.bench.map { $0.id } }
@@ -506,7 +506,7 @@ public struct MatchEngine {
             // A knockout tie level after 90 minutes (on aggregate, in a
             // second leg) goes to extra time.
             if minute == 90 + state.secondHalfStoppage && config.isKnockout
-                && tieIsLevel(state, config: config) && state.maxMinute < 120 {
+                && tieIsLevel(state, config: config) && !state.isExtraTime {
                 let aggHome = state.home.goals + config.homeAggregateCarry
                 let aggAway = state.away.goals + config.awayAggregateCarry
                 state.events.append(MatchEvent(
@@ -520,10 +520,10 @@ public struct MatchEngine {
                         : "Ninety minutes could not separate these sides. Thirty more to come, and one more substitution each.",
                     isHomeTeam: true
                 ))
-                state.maxMinute = 120
+                state.maxMinute = minute + 30
             }
 
-            let stopForManager = config.pauseForUserDecisions && state.injuredUserPlayerId != nil
+            let stopForManager = minute < state.maxMinute && config.pauseForUserDecisions && state.injuredUserPlayerId != nil
             var reachedStop = false
             if let pauseAfter, minute >= pauseAfter, minute < state.maxMinute { reachedStop = true }
             if reachedStop || stopForManager {
@@ -572,8 +572,9 @@ public struct MatchEngine {
 
     /// The match so far as a result: score, events, stats and ratings.
     private static func makeResult(_ state: PausedMatch, homeClub: Club, awayClub: Club, config: SimulationConfig, motm: UUID?) -> MatchResult {
-        let total = max(1.0, state.home.possessionMinutes + state.away.possessionMinutes)
-        let homePoss = ((state.home.possessionMinutes / total) * 1000.0).rounded() / 10.0
+        let total = state.home.possessionMinutes + state.away.possessionMinutes
+        let homePoss = total == 0 ? 50.0
+            : ((state.home.possessionMinutes / total) * 1000.0).rounded() / 10.0
         func stats(_ side: SideState, _ club: Club, possession: Double) -> MatchStats {
             MatchStats(
                 possession: possession,
@@ -929,8 +930,8 @@ public struct MatchEngine {
 
     /// Weighted by position and finishing: strikers take most of the shots,
     /// midfielders some, defenders few, the goalkeeper none.
-    private static func pickShooter(_ side: SideState, header: Bool = false) -> Int? {
-        let candidates = side.active.indices.filter { side.active[$0].isOnPitch && side.active[$0].slot != .GK }
+    private static func pickShooter(_ side: SideState, header: Bool = false, excluding excluded: Int? = nil) -> Int? {
+        let candidates = side.active.indices.filter { $0 != excluded && side.active[$0].isOnPitch && side.active[$0].slot != .GK }
         guard !candidates.isEmpty else { return nil }
         func weight(_ p: ActiveMatchPlayer) -> Double {
             let positionWeight: Double
@@ -1050,14 +1051,17 @@ public struct MatchEngine {
         let finishing = Double(shooter.attributes.shooting) * 0.6 + Double(shooter.attributes.composure) * 0.4
         let finish = min(1.3, max(0.7, 1.0 + (finishing - 65.0) * 0.01))
         let keeperFactor = min(1.3, max(0.72, 1.0 - (keeper - 65.0) * 0.01))
-        let pGoal = min(0.95, xg / (1.0 - Tuning.blockRate) * finish * keeperFactor)
+        let pGoal = min(0.95, xg / (1.0 - blockRate) * finish * keeperFactor)
         let gkIdx = keeperIndex(defSide)
 
         if Double.random(in: 0..<1) < pGoal {
             // VAR: now and then the goal is ruled out (offside, handball, a
             // foul in the build-up).
             if Double.random(in: 0..<1) < 0.05 {
-                attSide.shotsOnTarget += 1
+                attSide.shots -= 1
+                attSide.xG -= xg
+                attSide.active[shooterIdx].currentRating -= 0.05
+                if let c = creatorIdx { attSide.active[c].currentRating -= 0.06 }
                 let line = CommentaryLines.varGoalDisallowed(scorer: shooter, club: attackingClub).randomElement()!
                 state.events.append(MatchEvent(minute: minute, type: .varDecision, clubId: attackingClub.id, playerId: shooter.id,
                                                shortText: "VAR: \(shooter.displayName)'s goal disallowed \(minute)'",
@@ -1149,7 +1153,7 @@ public struct MatchEngine {
         guard let takerIdx = onPitch.first(where: { attSide.active[$0].player.id == attackingClub.tactics.cornerTaker })
                 ?? onPitch.max(by: { attSide.active[$0].player.attributes.crossing < attSide.active[$1].player.attributes.crossing }) else { return }
         // Most corners come to nothing; about three in ten produce a shot.
-        guard Double.random(in: 0..<1) < 0.30, let headerIdx = pickShooter(attSide, header: true), headerIdx != takerIdx else {
+        guard Double.random(in: 0..<1) < 0.30, let headerIdx = pickShooter(attSide, header: true, excluding: takerIdx) else {
             if Double.random(in: 0..<1) < 0.3 {
                 let taker = attSide.active[takerIdx].player
                 state.events.append(MatchEvent(minute: minute, type: .corner, clubId: attackingClub.id, playerId: taker.id,
@@ -1398,6 +1402,7 @@ public struct MatchEngine {
             attSide.shotsOnTarget += 1
             attSide.active[takerIdx].goals += 1
             attSide.active[takerIdx].currentRating += 0.8
+            concede(&defSide, keeperIdx: gkIdx)
             let text = Commentary.goal(scorer: taker, assister: nil, club: kickingClub, opponent: defendingClub, minute: minute,
                                        homeGoals: kickerIsHome ? attSide.goals : defSide.goals,
                                        awayGoals: kickerIsHome ? defSide.goals : attSide.goals,
